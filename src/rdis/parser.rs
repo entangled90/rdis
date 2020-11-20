@@ -77,7 +77,7 @@ fn read_array(bytes: &[u8]) -> IResult<&[u8], RESP> {
 }
 
 
-fn read(bytes: &[u8]) -> IResult<&[u8], RESP> {
+pub fn read<'a>(bytes: &'a[u8]) -> IResult<&'a[u8], RESP> {
     alt((read_integer, read_simple, read_bulk, read_error, read_array))(bytes)
 }
 

@@ -1,10 +1,12 @@
-use std::error::Error;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
-pub type ResultT<A> = Result<A, Box<dyn Error>>;
+
+use anyhow::Result;
+
+pub type ResultT<A> = Result<A>;
 
 
 use super::protocol::*;

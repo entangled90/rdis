@@ -1,15 +1,11 @@
 use super::types::*;
-use bytes::{Bytes, BytesMut};
+use bytes::{Bytes, BytesMut, BufMut, Buf};
 use core::fmt::Write;
-use std::convert::From;
-use std::error::Error;
-use std::fmt::Display;
-use std::fmt::Formatter;
-use std::iter::FromIterator;
 use std::ops::Deref;
-use tokio::io::{AsyncWriteExt};
-use tokio::io::{BufReader, BufWriter};
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::net::TcpStream;
+use super::parser;
+use anyhow::*;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum RESP {
@@ -99,12 +95,19 @@ impl RESP {
         };
         Ok(())
     }
+
+    pub async fn write_async<W>(self, w: &mut W) -> ResultT<()>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        //TODO 1 extra copy to avoid dup
+        w.write_all(self.into_bytes()?.deref()).await?;
+        Ok(())
+    }
 }
 
 const CRLF: [char; 2] = ['\r', '\n'];
 const NULL_MSG: &str = "$-1\r\n";
-
-
 
 #[cfg(test)]
 mod tests {
@@ -143,14 +146,47 @@ mod tests {
 
 pub struct RedisCmd {
     pub stream: TcpStream,
-    pub buff: BytesMut,
+    buff: BytesMut
 }
 
-impl RedisCmd {
+impl RedisCmd  {
     pub fn new(stream: TcpStream) -> RedisCmd {
         RedisCmd {
             stream,
             buff: BytesMut::with_capacity(4096),
+            // cursor: 0,
+            // cmd: None
         }
+    }
+
+    pub async fn read_async(& mut self) -> ResultT<Option<RESP>>{
+        loop{
+            match self.parse_frame() {
+                Ok(resp) => 
+                    return Ok(resp),
+                Err(_) =>{
+                    if !self.buff.has_remaining(){
+                        self.buff.reserve(self.buff.len());
+                    }
+                    let n = self.stream.read_buf(&mut self.buff).await?;
+                    if n == 0 {
+                         // The remote closed the connection. For this to be
+                        // a clean shutdown, there should be no data in the
+                        // read buffer. If there is, this means that the
+                        // peer closed the socket while sending a frame.
+                        return Ok(None)
+                    } else {
+                        return Err(anyhow!("Connection reset by peer"))
+                    }
+                }
+            }
+        }
+    }
+
+    fn parse_frame(& mut self) -> ResultT<Option<RESP>>{
+        let (rem , resp) = parser::read(&self.buff)?;
+        self.buff.clear();
+        self.buff.put(rem);
+        Ok(Some(resp))
     }
 }
