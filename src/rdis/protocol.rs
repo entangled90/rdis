@@ -139,8 +139,6 @@ mod tests {
         }
         Ok(())
     }
-
-   
 }
 
 pub struct RedisCmd {

@@ -1,19 +1,14 @@
 use super::protocol::RESP;
-use super::types::*;
 use nom::*;
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take, take_until},
+    bytes::complete::{ take, take_until},
     character::complete::{alphanumeric1, char, crlf, digit1, space1},
-    combinator::{flat_map, map, opt, success},
+    combinator::{map, opt},
     multi::count,
     sequence::{preceded, terminated, tuple},
 };
 use std::convert::TryInto;
-use std::error::Error;
-use std::fmt::Display;
-use std::fmt::Formatter;
-use std::iter::FromIterator;
 
 fn read_positive_decimal(bytes: &[u8]) -> IResult<&[u8], u64> {
     let (rem, int_bytes) = digit1(bytes)?;
