@@ -5,7 +5,6 @@ use std::ops::Deref;
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::net::TcpStream;
 use super::parser;
-use anyhow::*;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum RESP {
@@ -176,7 +175,7 @@ impl RedisCmd  {
                         // peer closed the socket while sending a frame.
                         return Ok(None)
                     } else {
-                        return Err(anyhow!("Connection reset by peer"))
+                        return Err("Connection reset by peer".into())
                     }
                 }
             }
@@ -185,8 +184,9 @@ impl RedisCmd  {
 
     fn parse_frame(& mut self) -> ResultT<Option<RESP>>{
         let (rem , resp) = parser::read(&self.buff)?;
-        self.buff.clear();
-        self.buff.put(rem);
+        self.buff = BytesMut::from(rem);
+        // self.buff.clear();
+        // self.buff.put(rem);
         Ok(Some(resp))
     }
 }
