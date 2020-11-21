@@ -123,7 +123,6 @@ impl RedisCmd {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::super::types::*;

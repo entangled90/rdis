@@ -80,10 +80,10 @@ fn read_array(bytes: &[u8]) -> IResult<&[u8], RESP> {
 fn read_inline_commands(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let (rem, v) = terminated(separated_list1(space1, alphanumeric1), crlf)(bytes)?;
     let mut v_simple = Vec::with_capacity(v.len());
-    for b in v{
-        v_simple.push( RESP::SimpleString(read_string(b)));
-    };
-    Ok((rem,RESP::Array(v_simple)))
+    for b in v {
+        v_simple.push(RESP::SimpleString(read_string(b)));
+    }
+    Ok((rem, RESP::Array(v_simple)))
 }
 
 // fn read_ping(bytes: &[u8]) -> IResult<&[u8], RESP> {
@@ -91,9 +91,16 @@ fn read_inline_commands(bytes: &[u8]) -> IResult<&[u8], RESP> {
 //     map(parser, |s| RESP::Ping(read_string(s)))(bytes)
 // }
 
-pub fn read(bytes: & [u8]) -> ResultT<(&[u8], RESP)> {
-    alt((read_integer, read_simple, read_bulk, read_error, read_array, read_inline_commands))(bytes)
-        .map_err(|nom_err| nom_err.to_string().into())
+pub fn read(bytes: &[u8]) -> ResultT<(&[u8], RESP)> {
+    alt((
+        read_integer,
+        read_simple,
+        read_bulk,
+        read_error,
+        read_array,
+        read_inline_commands,
+    ))(bytes)
+    .map_err(|nom_err| nom_err.to_string().into())
 }
 
 #[cfg(test)]

@@ -54,7 +54,7 @@ pub struct RedisEngine {
 
 impl RedisEngine {
     pub fn new() -> RedisEngine {
-        let (sender, receiver) = mpsc::channel(4096*8);
+        let (sender, receiver) = mpsc::channel(4096 * 8);
         let data = RedisData {};
         RedisEngine {
             data,
@@ -75,23 +75,19 @@ impl RedisEngine {
         }
     }
 
-
-    fn handle_request(&mut self, req: RESP) -> RESP{
-
+    fn handle_request(&mut self, req: RESP) -> RESP {
         RESP::SimpleString("PING".to_owned())
     }
 }
 
-
-pub struct RedisEngineApi{
+pub struct RedisEngineApi {
     sender: mpsc::Sender<(RESP, oneshot::Sender<RESP>)>,
 }
 
-impl RedisEngineApi{
-
-    pub fn new (engine: &RedisEngine) -> RedisEngineApi{
-        RedisEngineApi{
-            sender: engine.sender.clone()
+impl RedisEngineApi {
+    pub fn new(engine: &RedisEngine) -> RedisEngineApi {
+        RedisEngineApi {
+            sender: engine.sender.clone(),
         }
     }
 
