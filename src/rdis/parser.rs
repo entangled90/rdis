@@ -1,15 +1,15 @@
 use super::protocol::RESP;
+use super::types::ResultT;
 use nom::*;
 use nom::{
     branch::alt,
-    bytes::complete::{ take, take_until},
+    bytes::complete::{tag, take, take_until},
     character::complete::{alphanumeric1, char, crlf, digit1, space1},
     combinator::{map, opt},
-    multi::count,
+    multi::{count, separated_list1},
     sequence::{preceded, terminated, tuple},
 };
 use std::convert::TryInto;
-use super::types::ResultT;
 
 fn read_positive_decimal(bytes: &[u8]) -> IResult<&[u8], u64> {
     let (rem, int_bytes) = digit1(bytes)?;
@@ -45,7 +45,7 @@ fn read_bulk(bytes: &[u8]) -> IResult<&[u8], RESP> {
 }
 
 fn read_simple(bytes: &[u8]) -> IResult<&[u8], RESP> {
-    let parser = preceded(char('+'), terminated(alphanumeric1, crlf));
+    let parser = preceded(char('+'), terminated(take_until("\r\n"), crlf));
     map(parser, |s| RESP::SimpleString(read_string(s)))(bytes)
 }
 
@@ -77,13 +77,24 @@ fn read_array(bytes: &[u8]) -> IResult<&[u8], RESP> {
     map(count(read_primitive, size as usize), |v| RESP::Array(v))(rem)
 }
 
-
-pub fn read<'a>(bytes: &'a[u8]) -> ResultT<(&'a[u8], RESP)> {
-    alt((read_integer, read_simple, read_bulk, read_error, read_array))(bytes).map_err(|nomErr| {
-        nomErr.to_string().into()
-    })
+fn read_inline_commands(bytes: &[u8]) -> IResult<&[u8], RESP> {
+    let (rem, v) = terminated(separated_list1(space1, alphanumeric1), crlf)(bytes)?;
+    let mut v_simple = Vec::with_capacity(v.len());
+    for b in v{
+        v_simple.push( RESP::SimpleString(read_string(b)));
+    };
+    Ok((rem,RESP::Array(v_simple)))
 }
 
+// fn read_ping(bytes: &[u8]) -> IResult<&[u8], RESP> {
+//     let parser = preceded(tag("PING "), alphanumeric1);
+//     map(parser, |s| RESP::Ping(read_string(s)))(bytes)
+// }
+
+pub fn read<'a>(bytes: &'a [u8]) -> ResultT<(&'a [u8], RESP)> {
+    alt((read_integer, read_simple, read_bulk, read_error, read_array, read_inline_commands))(bytes)
+        .map_err(|nom_err| nom_err.to_string().into())
+}
 
 #[cfg(test)]
 mod test {
@@ -91,9 +102,9 @@ mod test {
 
     #[test]
     pub fn test_read_simple() {
-        let res = read(b"+OK\r\n").unwrap();
+        let res = read(b"+OK!! \r\n").unwrap();
         assert_eq!(res.0.len(), 0);
-        assert_eq!(RESP::SimpleString("OK".to_owned()), res.1);
+        assert_eq!(RESP::SimpleString("OK!! ".to_owned()), res.1);
     }
 
     #[test]
@@ -142,11 +153,10 @@ mod test {
                 RESP::BulkString("hello".to_owned()),
                 RESP::BulkString("world".to_owned())
             ]),
-            read_array(b"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n").unwrap().1
+            read_array(b"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n")
+                .unwrap()
+                .1
         );
-        assert_eq!(
-            RESP::Array(vec![]),
-            read_array(b"*0\r\n").unwrap().1
-        );
+        assert_eq!(RESP::Array(vec![]), read_array(b"*0\r\n").unwrap().1);
     }
 }

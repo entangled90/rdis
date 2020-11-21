@@ -1,10 +1,13 @@
-use super::types::*;
-use bytes::{Bytes, BytesMut, BufMut, Buf};
-use core::fmt::Write;
-use std::ops::Deref;
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
-use tokio::net::TcpStream;
 use super::parser;
+use super::types::*;
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use core::fmt::Write;
+use std::error::Error;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::ops::Deref;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum RESP {
@@ -13,6 +16,7 @@ pub enum RESP {
     Integer(i64),
     BulkString(String),
     Array(Vec<RESP>),
+    // Ping(String),
     Null,
 }
 
@@ -49,6 +53,7 @@ impl RESP {
             RESP::BulkString(s) => 1 + s.len().to_string().len() + s.len() + CRLF.len(),
             RESP::Array(vec) => vec.iter().fold(3, |prev, el| prev + el.size_hint()),
             RESP::Null => NULL_MSG.len(),
+            // RESP::Ping(arg) => "PING".len() + 1 + arg.len()
         }
     }
 
@@ -91,6 +96,11 @@ impl RESP {
                 }
             }
             RESP::Null => writer.write_str(NULL_MSG)?,
+            // RESP::Ping(arg) => {
+            //     writer.write_str("PING")?;
+            //     writer.write_char(' ')?;
+            //     writer.write_str(arg.as_str())?;
+            // }
         };
         Ok(())
     }
@@ -145,10 +155,10 @@ mod tests {
 
 pub struct RedisCmd {
     pub stream: TcpStream,
-    buff: BytesMut
+    buff: BytesMut,
 }
 
-impl RedisCmd  {
+impl RedisCmd {
     pub fn new(stream: TcpStream) -> RedisCmd {
         RedisCmd {
             stream,
@@ -158,35 +168,39 @@ impl RedisCmd  {
         }
     }
 
-    pub async fn read_async(& mut self) -> ResultT<Option<RESP>>{
-        loop{
+    pub async fn read_async(&mut self) -> ResultT<Option<RESP>> {
+        loop {
             match self.parse_frame() {
-                Ok(resp) => 
-                    return Ok(resp),
-                Err(_) =>{
-                    if !self.buff.has_remaining(){
+                Ok(resp) => return Ok(resp),
+                Err(_) => {
+                    // println!("Failed to parse frame because of {}", err);
+                    if !self.buff.has_remaining() {
+                        // double the buffer
                         self.buff.reserve(self.buff.len());
                     }
                     let n = self.stream.read_buf(&mut self.buff).await?;
+                    // println!("Read {} bytes from socket: {:?}", n, String::from_utf8(self.buff.deref().to_vec()).unwrap());
                     if n == 0 {
-                         // The remote closed the connection. For this to be
+                        // The remote closed the connection. For this to be
                         // a clean shutdown, there should be no data in the
                         // read buffer. If there is, this means that the
                         // peer closed the socket while sending a frame.
-                        return Ok(None)
-                    } else {
-                        return Err("Connection reset by peer".into())
+                        return Ok(None);
                     }
                 }
             }
         }
     }
 
-    fn parse_frame(& mut self) -> ResultT<Option<RESP>>{
-        let (rem , resp) = parser::read(&self.buff)?;
+    pub async fn write_async(&mut self, resp: RESP) -> ResultT<()>{
+        resp.write_async(&mut self.stream).await
+    }
+
+    fn parse_frame(&mut self) -> ResultT<Option<RESP>> {
+        let (rem, resp) = parser::read(&self.buff)?;
         self.buff = BytesMut::from(rem);
-        // self.buff.clear();
         // self.buff.put(rem);
+        // self.buff.clear();
         Ok(Some(resp))
     }
 }
