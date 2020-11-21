@@ -2,8 +2,11 @@ use super::parser;
 use super::types::*;
 use async_recursion::async_recursion;
 use bytes::{Buf, BytesMut};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
+use tokio::prelude::AsyncRead;
+use tokio::prelude::AsyncWrite;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum RESP {
@@ -76,14 +79,18 @@ const CRLF: [u8; 2] = [b'\r', b'\n'];
 const NULL_MSG: &[u8] = b"$-1\r\n";
 
 pub struct RedisCmd {
-    pub stream: TcpStream,
+    // pub stream: TcpStream,
+    writer: BufWriter<OwnedWriteHalf>,
+    reader: BufReader<OwnedReadHalf>,
     buff: BytesMut,
 }
 
 impl RedisCmd {
     pub fn new(stream: TcpStream) -> RedisCmd {
+        let (read, write) = stream.into_split();
         RedisCmd {
-            stream,
+            writer: BufWriter::new(write),
+            reader: BufReader::new(read),
             buff: BytesMut::with_capacity(4096 * 8),
         }
     }
@@ -98,7 +105,7 @@ impl RedisCmd {
                         // double the buffer
                         self.buff.reserve(self.buff.len());
                     }
-                    let n = self.stream.read_buf(&mut self.buff).await?;
+                    let n = self.reader.read_buf(&mut self.buff).await?;
                     // println!("Read {} bytes from socket: {:?}", n, String::from_utf8(self.buff.deref().to_vec()).unwrap());
                     if n == 0 {
                         // The remote closed the connection. For this to be
@@ -113,7 +120,7 @@ impl RedisCmd {
     }
 
     pub async fn write_async(&mut self, resp: RESP) -> ResultT<()> {
-        resp.write_async(&mut self.stream).await
+        resp.write_async(&mut self.writer).await
     }
 
     fn parse_frame(&mut self) -> ResultT<Option<RESP>> {

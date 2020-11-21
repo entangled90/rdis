@@ -123,7 +123,7 @@ impl ClientConnection {
                     match self.redis_cmd.write_async(resp).await {
                         Ok(()) => (),
                         Err(err) => {
-                            println!("Erro when writing to client {}", err);
+                            println!("Error when writing to client {}", err);
                             break;
                         }
                     }
