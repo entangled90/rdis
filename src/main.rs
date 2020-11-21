@@ -5,7 +5,7 @@ use rdis::types::*;
 use std::sync::Arc;
 use std::ops::Deref;
 
-#[tokio::main]
+#[tokio::main(worker_threads = 3)]
 async fn main() -> ResultT<()> {
     let addr = "127.0.0.1:6379".parse().unwrap();
     let socket = TcpSocket::new_v4()?;

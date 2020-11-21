@@ -118,12 +118,12 @@ impl ClientConnection {
             let cmd = (&mut self).redis_cmd.read_async().await;
             match cmd {
                 Ok(Some(command)) => {
-                    println!("Received command {:?}", command);
+                    // println!("Received command {:?}", command);
                     let resp = match self.engine.request(command).await {
                         Ok(resp) => resp,
                         Err(err) => RESP::Error("Unexpected".to_owned(), err.to_string()),
                     };
-                    println!("Response is {:?}", resp);
+                    // println!("Response is {:?}", resp);
                     match self.redis_cmd.write_async(resp).await {
                         Ok(()) => (),
                         Err(err) => {
