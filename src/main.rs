@@ -5,6 +5,8 @@ use log::{info, LevelFilter};
 use rdis::types::*;
 use simple_logger::SimpleLogger;
 use std::sync::Arc;
+use rdis::engine::*;
+use tokio::sync::mpsc;
 
 #[tokio::main(worker_threads = 3)]
 async fn main() -> ResultT<()> {
@@ -21,10 +23,13 @@ async fn main() -> ResultT<()> {
     let listener = socket.listen(1024)?;
 
     let server = RedisServer::new(listener);
-    let mut engine = RedisEngine::new();
-    let api = Arc::new(RedisEngineApi::new(&engine));
+    let (sender, receiver) = mpsc::channel(4096 * 8);
+    let api = Arc::new(RedisEngineApi::new(sender));
 
-    let server_handle = tokio::spawn(async move { engine.start_loop().await });
+    let _server_handle = tokio::spawn(async move { 
+        let mut engine = RedisEngine::new(receiver);
+        engine.start_loop().await 
+    });
 
     while let Ok((stream, _)) = server.listener.accept().await {
         server.add_handle(tokio::spawn(

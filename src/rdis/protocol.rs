@@ -9,13 +9,15 @@ use tokio::net::TcpStream;
 use tokio::prelude::AsyncRead;
 use tokio::prelude::AsyncWrite;
 use log::{info, debug, warn, error};
+use std::sync::Arc;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
+
 pub enum RESP {
-    SimpleString(String),
+    SimpleString(Vec<u8>),
     Error(String, String),
     Integer(i64),
-    BulkString(String),
+    BulkString(Arc<Vec<u8>>),
     Array(Vec<RESP>),
     Null,
 }
@@ -39,7 +41,7 @@ impl RESP {
         match self {
             RESP::SimpleString(s) => {
                 writer.write_u8(b'+').await?;
-                writer.write_all(&s.as_bytes()).await?;
+                writer.write_all(&s.as_slice()).await?;
                 RESP::write_end(writer).await?;
             }
             RESP::Error(err_type, err) => {
@@ -59,7 +61,7 @@ impl RESP {
                 writer.write_u8(b'$').await?;
                 writer.write_all(&len.as_bytes()).await?;
                 RESP::write_end(writer).await?;
-                writer.write_all(&s.as_bytes()).await?;
+                writer.write_all(&s).await?;
                 RESP::write_end(writer).await?;
             }
             RESP::Array(mut vec) => {
@@ -155,21 +157,22 @@ mod tests {
     use super::RESP;
     use std::io::Cursor;
     use tokio::io::AsyncWriteExt;
+    use std::sync::Arc;
 
     #[tokio::test]
     pub async fn test_resp_encoding() -> ResultT<()> {
         let mut req: Vec<(RESP, Vec<u8>)> = vec![
-            (RESP::SimpleString("OK".to_owned()), b"+OK\r\n".to_vec()),
+            (RESP::SimpleString("OK".into()), b"+OK\r\n".to_vec()),
             (RESP::Integer(129), b":129\r\n".to_vec()),
             (
-                RESP::BulkString("foobar".to_owned()),
+                RESP::BulkString(Arc::new("foobar".into())),
                 b"$6\r\nfoobar\r\n".to_vec(),
             ),
             (RESP::Null, b"$-1\r\n".to_vec()),
             (
                 RESP::Array(vec![
-                    RESP::BulkString("foo".to_owned()),
-                    RESP::BulkString("bar".to_owned()),
+                    RESP::BulkString(Arc::new("foo".into())),
+                    RESP::BulkString(Arc::new("bar".into())),
                 ]),
                 b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n".to_vec(),
             ),
@@ -191,7 +194,7 @@ mod tests {
     pub async fn test_pipeline_req() -> ResultT<()> {
         let (client, server) = tokio::io::duplex(64);
         let mut cmd = RedisCmd::new(client, server);
-        let sent_msg = RESP::SimpleString("PING".to_string());
+        let sent_msg = RESP::SimpleString("PING".into());
         for _ in 0..3i8 {
             cmd.write_async(sent_msg.clone()).await?;
         }
@@ -214,7 +217,7 @@ mod tests {
         cmd.writer.write_all(pipeline_reqs).await?;
         for i in 0..3i8 {
             match cmd.read_async().await? {
-                Some(msg) => assert_eq!(RESP::Array(vec![RESP::SimpleString("PING".to_string())]), msg),
+                Some(msg) => assert_eq!(RESP::Array(vec![RESP::SimpleString("PING".into())]), msg),
                 None => panic!(format!("No message! at i={}", i)),
             }
         }

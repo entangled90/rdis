@@ -12,9 +12,12 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use log::{info, debug, warn, error};
 
+use super::engine::*;
+
 pub type ResultT<A> = Result<A, Box<dyn Error + Sync + Send>>;
 
 use super::protocol::*;
+
 
 pub struct RedisServer {
     pub listener: TcpListener,
@@ -22,8 +25,6 @@ pub struct RedisServer {
     client_epoch: AtomicUsize,
 }
 
-// contains the common data structures
-pub struct RedisData {}
 
 impl RedisServer {
     pub fn new(listener: TcpListener) -> RedisServer {
@@ -54,48 +55,14 @@ impl RedisServer {
     }
 }
 
-pub struct RedisEngine {
-    data: RedisData,
-    sender: mpsc::Sender<(RESP, oneshot::Sender<RESP>)>,
-    receiver: mpsc::Receiver<(RESP, oneshot::Sender<RESP>)>,
-}
-
-impl RedisEngine {
-    pub fn new() -> RedisEngine {
-        let (sender, receiver) = mpsc::channel(4096 * 8);
-        let data = RedisData {};
-        RedisEngine {
-            data,
-            sender,
-            receiver,
-        }
-    }
-
-    pub async fn start_loop(&mut self) -> () {
-        loop {
-            match self.receiver.recv().await {
-                Some((req, channel)) => channel.send(self.handle_request(req)).unwrap(),
-                None => {
-                    // TODO stay alive
-                    warn!("No senders, loop terminated");
-                }
-            }
-        }
-    }
-
-    fn handle_request(&mut self, req: RESP) -> RESP {
-        RESP::SimpleString("PING".to_owned())
-    }
-}
 
 pub struct RedisEngineApi {
     sender: mpsc::Sender<(RESP, oneshot::Sender<RESP>)>,
 }
-
 impl RedisEngineApi {
-    pub fn new(engine: &RedisEngine) -> RedisEngineApi {
+    pub fn new(sender: mpsc::Sender<(RESP, oneshot::Sender<RESP>)> ) -> RedisEngineApi {
         RedisEngineApi {
-            sender: engine.sender.clone(),
+            sender: sender.clone(),
         }
     }
 
