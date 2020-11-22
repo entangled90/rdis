@@ -1,18 +1,22 @@
 use tokio::net::TcpSocket;
 
 mod rdis;
+use log::{info, LevelFilter};
 use rdis::types::*;
-use std::ops::Deref;
+use simple_logger::SimpleLogger;
 use std::sync::Arc;
 
 #[tokio::main(worker_threads = 3)]
 async fn main() -> ResultT<()> {
-    let addr = "127.0.0.1:6379".parse().unwrap();
+    let logger = SimpleLogger::new().with_level(LevelFilter::Info);
+    logger.init()?;
+
+    let addr = "127.0.0.1:6379".parse()?;
     let socket = TcpSocket::new_v4()?;
 
     socket.set_reuseaddr(true)?;
     socket.bind(addr)?;
-    println!("Bound socket to addr {}", addr);
+    info!("Bound socket to addr {}", addr);
 
     let listener = socket.listen(1024)?;
 
