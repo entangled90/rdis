@@ -1,3 +1,4 @@
+use tokio::time::Instant;
 use std::fmt::Formatter;
 use std::fmt::Display;
 use tokio::net::tcp::OwnedWriteHalf;
@@ -13,6 +14,7 @@ use tokio::task::JoinHandle;
 use log::{info, debug, warn, error};
 
 use super::engine::*;
+use hdrhistogram::Histogram;
 
 pub type ResultT<A> = Result<A, Box<dyn Error + Sync + Send>>;
 
@@ -22,16 +24,18 @@ use super::protocol::*;
 pub struct RedisServer {
     pub listener: TcpListener,
     open_handles: Mutex<Vec<JoinHandle<()>>>,
-    client_epoch: AtomicUsize,
+    client_epoch: AtomicUsize
 }
 
 
 impl RedisServer {
     pub fn new(listener: TcpListener) -> RedisServer {
+        
         RedisServer {
             listener,
-            open_handles: Mutex::new(Vec::with_capacity(182)),
-            client_epoch: AtomicUsize::new(0)
+            open_handles: Mutex::new(Vec::with_capacity(1024)),
+            client_epoch: AtomicUsize::new(0),
+
         }
     }
 
@@ -42,7 +46,7 @@ impl RedisServer {
     ) -> ClientConnection {
         let client_epoch = self.client_epoch.fetch_add(1, Ordering::SeqCst);
         ClientConnection {
-            redis_cmd: RedisCmd::from_stream(stream),
+            redis_cmd: RedisCmd::from_stream(stream, client_epoch),
             engine,
             client_epoch
         }
@@ -67,18 +71,21 @@ impl RedisEngineApi {
     }
 
     pub async fn request(&self, req: RESP) -> ResultT<RESP> {
+        let t = Instant::now();
         let (tx, rx) = oneshot::channel();
         // fix this
         self.sender.send((req, tx)).await.unwrap();
         match rx.await {
-            Ok(e) => Ok(e),
+            Ok(e) => {
+                Ok(e)
+            },
             Err(err) => Err(Box::new(err)),
         }
     }
 }
 
 pub struct ClientConnection {
-    redis_cmd: RedisCmd<BufReader<OwnedReadHalf>,BufWriter<OwnedWriteHalf>>,
+    redis_cmd: RedisCmd<OwnedReadHalf,BufWriter<OwnedWriteHalf>>,
     engine: Arc<RedisEngineApi>,
     client_epoch: usize
 }
@@ -94,7 +101,10 @@ impl  ClientConnection {
     pub async fn start_loop(mut self) -> () {
         info!("Connection received {}", self);
         loop {
+            let before_read = Instant::now();
             let cmd = (&mut self).redis_cmd.read_async().await;
+            let read_delta = before_read.elapsed().as_micros();
+            debug!("Time for read {}, client={}", read_delta, self.client_epoch);
             match cmd {
                 Ok(Some(command)) => {
                     debug!("Received command {:?}", command);
@@ -106,7 +116,7 @@ impl  ClientConnection {
                     match self.redis_cmd.write_async(resp).await {
                         Ok(()) => (),
                         Err(err) => {
-                            error!("Error when writing to client {}", err);
+                            error!("Error when writing to client={}", err);
                             break;
                         }
                     }

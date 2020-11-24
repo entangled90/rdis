@@ -1,6 +1,7 @@
+use tokio::runtime::{Runtime, Builder};
 use super::protocol::RESP;
 use log::{debug, error, info, warn};
-use std::collections::{HashMap, VecDeque, BTreeMap};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use RESP::*;
@@ -9,11 +10,13 @@ type RawValue = Vec<u8>;
 use super::types::ResultT;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+type Key = Arc<RawValue>;
 // contains the common data structures
 struct RedisData {
-    single_map: HashMap<Arc<RawValue>, Arc<RawValue>>,
-    list_map: HashMap<Arc<RawValue>, VecDeque<Arc<RawValue>>>,
-    eviction: BTreeMap<u64, Arc<RawValue>>,
+    single_map: HashMap<Key, Arc<RawValue>>,
+    list_map: HashMap<Key, VecDeque<Arc<RawValue>>>,
+    eviction: BTreeMap<u64, HashSet<Key>>,
+    last_evicted_t: u64,
 }
 
 const DEFAULT_CAPACITY: usize = 4096;
@@ -25,24 +28,42 @@ impl RedisData {
             single_map: HashMap::with_capacity(DEFAULT_CAPACITY),
             list_map: HashMap::with_capacity(DEFAULT_CAPACITY),
             eviction: BTreeMap::new(),
+            last_evicted_t: 0,
         }
     }
 
     fn evict_if_needed(&mut self, t: u64) {
-        let to_remove: Vec<_> = self
+        let to_remove: Vec<u64> = self
             .eviction
-            .range(0..t).map(|(k,v)| (k, v.clone())).collect();
+            .range(self.last_evicted_t..t)
+            .map(|(k, _)| k.clone())
+            .collect();
+        self.last_evicted_t = t;
 
-        for (k,v) in to_remove {
-            self.single_map.remove(&v);
-            // FIX WITH A LIST
-            // self.eviction.remove(k);
+        for k in to_remove {
+            if let Some(values) = self.eviction.remove(&k) {
+                for v in values {
+                    self.single_map.remove(&v);
+                }
+            }
         }
+    }
+
+    fn insert_eviction(&mut self, k: Key, t: u64) {
+        let set = match self.eviction.get_mut(&t) {
+            Some(l) => l,
+            None => {
+                let s = HashSet::new();
+                self.eviction.insert(t, s);
+                self.eviction.get_mut(&t).unwrap()
+            }
+        };
+        set.insert(k);
     }
 
     fn set(&mut self, k: Arc<RawValue>, v: Arc<RawValue>, evict_at: Option<u64>) {
         self.single_map.insert(k.clone(), v);
-        evict_at.map(|at| self.eviction.insert(at, k.clone()));
+        evict_at.map(|t| self.insert_eviction(k, t));
     }
 
     fn get(&mut self, k: &RawValue, t: u64) -> Option<Arc<RawValue>> {
@@ -62,7 +83,7 @@ impl RedisData {
     }
 
     fn l_push(&mut self, k: Arc<RawValue>, v: Arc<RawValue>, evict_at: Option<u64>) {
-        evict_at.map(|at| self.eviction.insert( at,k.clone()));
+        evict_at.map(|t| self.insert_eviction(k.clone(), t));
         let deq = self
             .list_map
             .entry(k.clone())
@@ -71,7 +92,7 @@ impl RedisData {
     }
 
     fn r_push(&mut self, k: Arc<RawValue>, v: Arc<RawValue>, evict_at: Option<u64>) {
-        evict_at.map(|at| self.eviction.insert(at, k.clone()));
+        evict_at.map(|t| self.insert_eviction(k.clone(), t));
         let deq = self
             .list_map
             .entry(k.clone())
@@ -82,6 +103,7 @@ impl RedisData {
     fn l_pop(&mut self, k: &RawValue) -> Option<Arc<RawValue>> {
         self.list_map.get_mut(k).and_then(|list| list.pop_front())
     }
+
     fn r_pop(&mut self, k: &RawValue) -> Option<Arc<RawValue>> {
         self.list_map.get_mut(k).and_then(|list| list.pop_back())
     }
@@ -90,12 +112,14 @@ impl RedisData {
 pub struct RedisEngine {
     data: RedisData,
     receiver: mpsc::Receiver<(RESP, oneshot::Sender<RESP>)>,
+    runtime: Runtime
 }
 
 impl RedisEngine {
     pub fn new(receiver: mpsc::Receiver<(RESP, oneshot::Sender<RESP>)>) -> RedisEngine {
         let data = RedisData::new();
-        RedisEngine { data, receiver }
+        let runtime = Builder::new_current_thread().build().unwrap();
+        RedisEngine { data, receiver, runtime }
     }
 
     fn current_time() -> u64 {
@@ -105,9 +129,9 @@ impl RedisEngine {
             .as_millis() as u64
     }
 
-    pub async fn start_loop(&mut self) -> () {
+    pub fn start_loop(&mut self) -> () {
         loop {
-            match self.receiver.recv().await {
+            match self.runtime.block_on(self.receiver.recv()) {
                 Some((req, channel)) => {
                     let t = RedisEngine::current_time();
                     channel.send(self.handle_request(req, t)).unwrap()
@@ -120,9 +144,7 @@ impl RedisEngine {
         }
     }
 
-    fn error_resp() -> RESP {
-        Error("Error".into(), "too many arguments".into())
-    }
+   
 
     fn handle_request(&mut self, req: RESP, t: u64) -> RESP {
         match req {
@@ -165,6 +187,10 @@ impl RedisEngine {
             },
             other => self.handle_request(Array(vec![other]), t),
         }
+    }
+
+    fn error_resp() -> RESP {
+        Error("Error".into(), "too many arguments".into())
     }
 
     fn ok() -> RESP {

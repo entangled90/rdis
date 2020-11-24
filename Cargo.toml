@@ -7,8 +7,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [profile.release]
-lto = true
-opt-level = 3
+# lto = true
+# opt-level = 3
+debug = true
 
 [dependencies]
 tokio = { version = "0.3", features = ["full"] }
@@ -17,3 +18,4 @@ nom = {version ="6.0.0"}
 async-recursion = {version="0.3"}
 log = {version = "0.4"}
 simple_logger = {version = "1.11"}
+hdrhistogram = "7.1.0"

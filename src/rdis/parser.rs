@@ -1,3 +1,4 @@
+use std::time::Instant;
 use super::protocol::RESP;
 use super::types::ResultT;
 use nom::*;
@@ -11,6 +12,7 @@ use nom::{
 };
 use std::convert::TryInto;
 use std::sync::Arc;
+use log::info;
 
 fn read_positive_decimal(bytes: &[u8]) -> IResult<&[u8], u64> {
     let (rem, int_bytes) = digit1(bytes)?;

@@ -1,15 +1,16 @@
+use std::time::Instant;
 use super::parser;
 use super::types::*;
 use async_recursion::async_recursion;
 use bytes::{Buf, BytesMut};
+use log::{debug, error, info, warn};
 use std::fmt::Debug;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::prelude::AsyncRead;
 use tokio::prelude::AsyncWrite;
-use log::{info, debug, warn, error};
-use std::sync::Arc;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 
@@ -87,42 +88,49 @@ pub struct RedisCmd<R, W> {
     writer: W,
     reader: R,
     buff: BytesMut,
+    client_epoch: usize
 }
 
-impl RedisCmd<BufReader<OwnedReadHalf>, BufWriter<OwnedWriteHalf>> {
+impl RedisCmd<OwnedReadHalf, BufWriter<OwnedWriteHalf>> {
     pub fn from_stream(
-        stream: TcpStream,
-    ) -> RedisCmd<BufReader<OwnedReadHalf>, BufWriter<OwnedWriteHalf>> {
+        stream: TcpStream
+        , client_epoch: usize
+    ) -> RedisCmd<OwnedReadHalf, BufWriter<OwnedWriteHalf>> {
         let (reader, writer) = stream.into_split();
-        RedisCmd::new(BufReader::new(reader), BufWriter::new(writer))
+        RedisCmd::new(reader, BufWriter::new(writer), client_epoch)
     }
 }
 
 impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd<R, W> {
-    pub fn new(r: R, w: W) -> RedisCmd<R, W> {
+    pub fn new(r: R, w: W, client_epoch: usize)  -> RedisCmd<R, W> {
         RedisCmd {
             writer: w,
             reader: r,
-            buff: BytesMut::with_capacity(4096 * 8),
+            buff: BytesMut::with_capacity(4096),
+            client_epoch
         }
     }
 
     pub async fn read_async(&mut self) -> ResultT<Option<RESP>> {
         loop {
             match self.parse_frame() {
-                Ok(resp) => return Ok(resp),
+                Ok(resp) => {
+                    return Ok(resp)
+                },
                 Err(err) => {
-                    if !self.buff.is_empty() {
-                        debug!("Failed to parse frame because of {}", err);
-                        debug!("Buffer contains {}", String::from_utf8(self.buff.to_vec()).unwrap());
-                    }
+                    // if !self.buff.is_empty() {
+                    //     debug!("Failed to parse frame because of {}", err);
+                    //     debug!(
+                    //         "Buffer contains {}",
+                    //         String::from_utf8(self.buff.to_vec()).unwrap()
+                    //     );
+                    // }
                     if !self.buff.has_remaining() {
                         // double the buffer
-                        self.buff.reserve(self.buff.len());
+                        self.buff.reserve(10 * self.buff.len());
                     }
                     let n = self.reader.read_buf(&mut self.buff).await?;
-                    // println!(
-                    //     "Read {} bytes from socket: {:?}",
+                    debug!("Read {} bytes from socket from client {}", n, self.client_epoch);
                     //     n,
                     //     String::from_utf8(self.buff.to_vec()).unwrap()
                     // );
@@ -144,7 +152,9 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
 
     fn parse_frame(&mut self) -> ResultT<Option<RESP>> {
         let (rem, resp) = parser::read(&self.buff)?;
-        self.buff = BytesMut::from(rem);
+        let mut b  = BytesMut::with_capacity(4096);
+        b.extend_from_slice(rem);
+        self.buff = b;
         Ok(Some(resp))
     }
 }
@@ -156,8 +166,8 @@ mod tests {
     use super::RedisCmd;
     use super::RESP;
     use std::io::Cursor;
-    use tokio::io::AsyncWriteExt;
     use std::sync::Arc;
+    use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
     pub async fn test_resp_encoding() -> ResultT<()> {
@@ -193,7 +203,7 @@ mod tests {
     #[tokio::test]
     pub async fn test_pipeline_req() -> ResultT<()> {
         let (client, server) = tokio::io::duplex(64);
-        let mut cmd = RedisCmd::new(client, server);
+        let mut cmd = RedisCmd::new(client, server, 1);
         let sent_msg = RESP::SimpleString("PING".into());
         for _ in 0..3i8 {
             cmd.write_async(sent_msg.clone()).await?;
@@ -207,13 +217,11 @@ mod tests {
         Ok(())
     }
 
-
-
     #[tokio::test]
     pub async fn test_pipeline_req_benchmark() -> ResultT<()> {
         let (client, server) = tokio::io::duplex(1024);
         let mut cmd = RedisCmd::new(client, server);
-        let pipeline_reqs  = b"PING\r\nPING\r\nPING\r\n"; 
+        let pipeline_reqs = b"PING\r\nPING\r\nPING\r\n";
         cmd.writer.write_all(pipeline_reqs).await?;
         for i in 0..3i8 {
             match cmd.read_async().await? {
@@ -222,7 +230,5 @@ mod tests {
             }
         }
         Ok(())
-
-
     }
 }
