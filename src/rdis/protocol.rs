@@ -220,7 +220,7 @@ mod tests {
     #[tokio::test]
     pub async fn test_pipeline_req_benchmark() -> ResultT<()> {
         let (client, server) = tokio::io::duplex(1024);
-        let mut cmd = RedisCmd::new(client, server);
+        let mut cmd = RedisCmd::new(client, server, 0);
         let pipeline_reqs = b"PING\r\nPING\r\nPING\r\n";
         cmd.writer.write_all(pipeline_reqs).await?;
         for i in 0..3i8 {
