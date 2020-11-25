@@ -60,16 +60,16 @@ impl RedisServer {
 }
 
 pub struct RedisEngineApi {
-    sender: mpsc::Sender<(RESP, oneshot::Sender<RESP>)>,
+    sender: mpsc::Sender<(ClientReq, oneshot::Sender<ClientReq>)>,
 }
 impl RedisEngineApi {
-    pub fn new(sender: mpsc::Sender<(RESP, oneshot::Sender<RESP>)>) -> RedisEngineApi {
+    pub fn new(sender: mpsc::Sender<(ClientReq, oneshot::Sender<ClientReq>)>) -> RedisEngineApi {
         RedisEngineApi {
             sender: sender.clone(),
         }
     }
 
-    pub async fn request(&self, req: RESP) -> ResultT<RESP> {
+    pub async fn request(&self, req: ClientReq) -> ResultT<ClientReq> {
         let (tx, rx) = oneshot::channel();
         // fix this
         self.sender.send((req, tx)).await.unwrap();
@@ -104,17 +104,21 @@ impl ClientConnection {
             let read_delta = before_read.elapsed().as_micros();
             debug!("Time for read {}, client={}", read_delta, self.client_epoch);
             match cmd {
-                Ok(mut _commands) => {
-                    let mut commands: Vec<_> = _commands.into();
-                    if commands.len() > 0 {
-                        debug!("Received command {:?}", commands);
-                        for command in commands.drain(0..) {
-                            let responses = match self.engine.request(command).await {
-                                Ok(resp) => resp,
-                                Err(err) => RESP::Error("Unexpected".to_owned(), err.to_string()),
-                            };
-                            debug!("Response is {:?}", responses);
-                            match self.redis_cmd.write_async(responses, true).await {
+                Ok(commands) => {
+                    let len = commands.len();
+                    if len > 0 {
+                        let responses = match self.engine.request(commands).await {
+                            Ok(resp) => resp,
+                            // not really correct
+                            Err(err) => ClientReq::Single(RESP::Error(
+                                "Unexpected".to_owned(),
+                                err.to_string(),
+                            )),
+                        };
+                        let mut resp_vec: Vec<_> = responses.into();
+                        for (idx, response) in resp_vec.drain(0..).enumerate() {
+                            debug!("Response is {:?}", response);
+                            match self.redis_cmd.write_async(response, idx == len - 1).await {
                                 Ok(()) => (),
                                 Err(err) => {
                                     error!("Error when writing to client={}", err);

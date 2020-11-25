@@ -1,5 +1,4 @@
 use crate::rdis::engine::RedisEngine;
-use std::time::Duration;
 use tokio::net::TcpSocket;
 
 mod rdis;
@@ -7,10 +6,9 @@ use log::{info, LevelFilter};
 use rdis::types::*;
 use simple_logger::SimpleLogger;
 use std::sync::Arc;
-use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc;
 
-#[tokio::main(worker_threads = 4)]
+#[tokio::main(worker_threads = 2)]
 async fn main() -> ResultT<()> {
     let logger = SimpleLogger::new().with_level(LevelFilter::Info);
     logger.init()?;
@@ -28,9 +26,9 @@ async fn main() -> ResultT<()> {
     let (sender, receiver) = mpsc::channel(4096);
     let api = Arc::new(RedisEngineApi::new(sender));
 
-    let _server_handle = std::thread::spawn(move || {
+    let _server_handle = tokio::spawn(async move {
         let mut engine = RedisEngine::new(receiver);
-        engine.start_loop()
+        engine.start_loop().await
     });
 
     // tokio::time::timeout(Duration::from_secs(10),

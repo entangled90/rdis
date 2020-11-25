@@ -1,5 +1,6 @@
 use super::protocol::RESP;
-use log::{debug, error, info, warn};
+use crate::rdis::protocol::ClientReq;
+use log::{debug, info, warn};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::runtime::{Builder, Runtime};
@@ -111,19 +112,13 @@ impl RedisData {
 
 pub struct RedisEngine {
     data: RedisData,
-    receiver: mpsc::Receiver<(RESP, oneshot::Sender<RESP>)>,
-    runtime: Runtime,
+    receiver: mpsc::Receiver<(ClientReq, oneshot::Sender<ClientReq>)>,
 }
 
 impl RedisEngine {
-    pub fn new(receiver: mpsc::Receiver<(RESP, oneshot::Sender<RESP>)>) -> RedisEngine {
+    pub fn new(receiver: mpsc::Receiver<(ClientReq, oneshot::Sender<ClientReq>)>) -> RedisEngine {
         let data = RedisData::new();
-        let runtime = Builder::new_current_thread().build().unwrap();
-        RedisEngine {
-            data,
-            receiver,
-            runtime,
-        }
+        RedisEngine { data, receiver }
     }
 
     fn current_time() -> u64 {
@@ -133,12 +128,23 @@ impl RedisEngine {
             .as_millis() as u64
     }
 
-    pub fn start_loop(&mut self) -> () {
+    pub async fn start_loop(&mut self) -> () {
         loop {
-            match self.runtime.block_on(self.receiver.recv()) {
+            match self.receiver.recv().await {
                 Some((req, channel)) => {
                     let t = RedisEngine::current_time();
-                    channel.send(self.handle_request(req, t)).unwrap()
+                    match req {
+                        ClientReq::Single(r) => channel
+                            .send(ClientReq::Single(self.handle_request(&r, t)))
+                            .unwrap(),
+                        ClientReq::Pipeline(rs) => {
+                            let mut resp = Vec::with_capacity(rs.len());
+                            for r in rs.iter() {
+                                resp.push(self.handle_request(r, t));
+                            }
+                            channel.send(ClientReq::Pipeline(resp)).unwrap()
+                        }
+                    }
                 }
                 None => {
                     // TODO stay alive
@@ -148,7 +154,7 @@ impl RedisEngine {
         }
     }
 
-    fn handle_request(&mut self, req: RESP, t: u64) -> RESP {
+    fn handle_request(&mut self, req: &RESP, t: u64) -> RESP {
         match req {
             Array(commands) => match commands.as_slice() {
                 [] => Error("todo".into(), "empty command".into()),
@@ -187,7 +193,7 @@ impl RedisEngine {
                 },
                 _ => RedisEngine::error_resp(),
             },
-            other => self.handle_request(Array(vec![other]), t),
+            other => self.handle_request(&Array(vec![other.clone()]), t),
         }
     }
 

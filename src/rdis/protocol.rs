@@ -160,7 +160,6 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
                     sendable.push(r);
                 }
             }
-            info!("requests are {}", sendable.len());
             ClientReq::Pipeline(sendable)
         }
     }
@@ -196,6 +195,15 @@ impl Into<Vec<RESP>> for ClientReq {
         match self {
             Single(r) => vec![r],
             Pipeline(v) => v,
+        }
+    }
+}
+
+impl ClientReq {
+    pub fn len(&self) -> usize {
+        match self {
+            Single(_) => 1,
+            Pipeline(rs) => rs.len(),
         }
     }
 }
