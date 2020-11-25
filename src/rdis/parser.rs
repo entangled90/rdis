@@ -89,7 +89,7 @@ fn read_inline_commands(bytes: &[u8]) -> IResult<&[u8], RESP> {
     Ok((rem, RESP::Array(v_simple)))
 }
 
-pub fn read(bytes: &[u8]) -> ResultT<(&[u8], RESP)> {
+pub fn read(bytes: &[u8]) -> IResult<&[u8], RESP>  {
     alt((
         read_integer,
         read_simple,
@@ -98,7 +98,6 @@ pub fn read(bytes: &[u8]) -> ResultT<(&[u8], RESP)> {
         read_array,
         read_inline_commands,
     ))(bytes)
-    .map_err(|nom_err| nom_err.to_string().into())
 }
 
 #[cfg(test)]

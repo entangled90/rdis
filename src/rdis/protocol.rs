@@ -1,4 +1,3 @@
-use std::time::Instant;
 use super::parser;
 use super::types::*;
 use async_recursion::async_recursion;
@@ -6,6 +5,7 @@ use bytes::{Buf, BytesMut};
 use log::{debug, error, info, warn};
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
@@ -35,7 +35,7 @@ impl RESP {
     }
 
     #[async_recursion]
-    pub async fn write_async<W>(self, writer: &mut W) -> ResultT<()>
+    pub async fn write_async<W>(self, writer: &mut W, flush: bool) -> ResultT<()>
     where
         W: AsyncWriteExt + Unpin + Send,
     {
@@ -70,12 +70,14 @@ impl RESP {
                 writer.write_all(&vec.len().to_string().as_bytes()).await?;
                 RESP::write_end(writer).await?;
                 for el in vec.drain(0..vec.len()) {
-                    el.write_async(writer).await?;
+                    el.write_async(writer, false).await?;
                 }
             }
             RESP::Null => writer.write_all(NULL_MSG).await?,
         };
-        writer.flush().await?;
+        if flush{
+            writer.flush().await?;
+        }
         Ok(())
     }
 }
@@ -88,13 +90,14 @@ pub struct RedisCmd<R, W> {
     writer: W,
     reader: R,
     buff: BytesMut,
-    client_epoch: usize
+    client_epoch: usize,
+    pipelined_request: Vec<RESP>,
 }
 
 impl RedisCmd<OwnedReadHalf, BufWriter<OwnedWriteHalf>> {
     pub fn from_stream(
-        stream: TcpStream
-        , client_epoch: usize
+        stream: TcpStream,
+        client_epoch: usize,
     ) -> RedisCmd<OwnedReadHalf, BufWriter<OwnedWriteHalf>> {
         let (reader, writer) = stream.into_split();
         RedisCmd::new(reader, BufWriter::new(writer), client_epoch)
@@ -102,62 +105,106 @@ impl RedisCmd<OwnedReadHalf, BufWriter<OwnedWriteHalf>> {
 }
 
 impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd<R, W> {
-    pub fn new(r: R, w: W, client_epoch: usize)  -> RedisCmd<R, W> {
+    pub fn new(r: R, w: W, client_epoch: usize) -> RedisCmd<R, W> {
         RedisCmd {
             writer: w,
             reader: r,
             buff: BytesMut::with_capacity(4096),
-            client_epoch
+            client_epoch,
+            pipelined_request: Vec::with_capacity(1024),
         }
     }
-
-    pub async fn read_async(&mut self) -> ResultT<Option<RESP>> {
+    // requests are read all togethere, in order to minimize write operations as well
+    pub async fn read_async(&mut self) -> ResultT<ClientReq> {
         loop {
             match self.parse_frame() {
                 Ok(resp) => {
-                    return Ok(resp)
-                },
-                Err(err) => {
-                    // if !self.buff.is_empty() {
-                    //     debug!("Failed to parse frame because of {}", err);
-                    //     debug!(
-                    //         "Buffer contains {}",
-                    //         String::from_utf8(self.buff.to_vec()).unwrap()
-                    //     );
-                    // }
-                    if !self.buff.has_remaining() {
-                        // double the buffer
-                        self.buff.reserve(10 * self.buff.len());
+                    if let Some(r) = resp {
+                        self.pipelined_request.push(r);
+                    } else {
+                        return Ok(vec![]);
                     }
-                    let n = self.reader.read_buf(&mut self.buff).await?;
-                    debug!("Read {} bytes from socket from client {}", n, self.client_epoch);
-                    //     n,
-                    //     String::from_utf8(self.buff.to_vec()).unwrap()
-                    // );
-                    if n == 0 {
-                        // The remote closed the connection. For this to be
-                        // a clean shutdown, there should be no data in the
-                        // read buffer. If there is, this means that the
-                        // peer closed the socket while sending a frame.
-                        return Ok(None);
+                }
+                Err(err) => {
+                    if self.pipelined_request.len() > 0 {
+                        // info!("returning req #{}", self.pipelined_request.len());
+                        return Ok(self.fill_output_pipeline_req());
+                    } else {
+                        if self.buff.capacity() == 0 {
+                            self.buff.reserve(2 * self.buff.len());
+                            warn!("Expanding buffer to {}", self.buff.len());
+                        }
+                        let n = self.reader.read_buf(&mut self.buff).await?;
+                        debug!(
+                            "Read {} bytes from socket from client {}",
+                            n, self.client_epoch
+                        );
+                        if n == 0 {
+                            // The remote closed the connection. For this to be
+                            // a clean shutdown, there should be no data in the
+                            // read buffer. If there is, this means that the
+                            // peer closed the socket while sending a frame.
+                            return Ok(self.fill_output_pipeline_req());
+                        }
                     }
                 }
             }
         }
     }
 
-    pub async fn write_async(&mut self, resp: RESP) -> ResultT<()> {
-        resp.write_async(&mut self.writer).await
+    fn fill_output_pipeline_req(&mut self) -> ClientReq{
+        let received = self.pipelined_request.len();
+        if received == 1 {
+            ClientReq::Single(self.pipelined_request.pop().unwrap())
+        } else {
+            let mut sendable = Vec::with_capacity(received);
+            {
+                for  r in self.pipelined_request.drain(0..){
+                    sendable.push(r);           
+                }
+            }
+            ClientReq::Pipeline(sendable)
+        }
+    }
+
+    pub async fn write_async(&mut self, resp: RESP, flush: bool) -> ResultT<()> {
+        resp.write_async(&mut self.writer, flush).await
     }
 
     fn parse_frame(&mut self) -> ResultT<Option<RESP>> {
-        let (rem, resp) = parser::read(&self.buff)?;
-        let mut b  = BytesMut::with_capacity(4096);
-        b.extend_from_slice(rem);
-        self.buff = b;
-        Ok(Some(resp))
+        let slice = &self.buff;
+        let size = slice.len();
+        let (rem, resp) = match parser::read(slice) {
+            Ok((rem, resp)) => Ok((Some(rem), Some(resp))),
+            Err(nom::Err::Incomplete(_)) => Ok((None,None)),
+            Err(err) => Err(ErrorT::from(format!("Fatal parsing error {}", err))),
+        }?;
+        let rem_size = rem.map_or(0,|r| r.len());
+        self.buff = self.buff.split_off(size - rem_size);
+        Ok(resp)
     }
 }
+
+pub enum ClientReq{
+    Single(RESP),
+    Pipeline(Vec<RESP>),
+    EOS
+}
+
+use ClientReq::*;
+
+// impl IntoIterator for ClientReq{
+//     type Item = RESP;
+//     type IntoIter = std::slice::Iter<RESP>;
+
+//     fn into_iter(self) -> <Self as std::iter::IntoIterator>::IntoIter {
+//         match self {
+//             Single(r) => vec![r],
+//             Pipeline(v) => v,
+//             EOS => vec![]
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -194,7 +241,7 @@ mod tests {
         ];
         for (en, bytes) in req.drain(0..req.len()) {
             let mut b = Cursor::new(Vec::new());
-            en.write_async(&mut b).await?;
+            en.write_async(&mut b, true).await?;
             assert_eq!(b.into_inner(), bytes);
         }
         Ok(())
@@ -205,14 +252,13 @@ mod tests {
         let (client, server) = tokio::io::duplex(64);
         let mut cmd = RedisCmd::new(client, server, 1);
         let sent_msg = RESP::SimpleString("PING".into());
-        for _ in 0..3i8 {
-            cmd.write_async(sent_msg.clone()).await?;
-        }
         for i in 0..3i8 {
-            match cmd.read_async().await? {
-                Some(msg) => assert_eq!(msg, sent_msg.clone()),
-                None => panic!(format!("No message! at i={}", i)),
-            }
+            cmd.write_async(sent_msg.clone(), i == 2).await?;
+        }
+        let mut resp = cmd.read_async().await?;
+        assert_eq!(resp.len(), 3);
+        for r in resp.drain(0..){
+            assert_eq!(r, sent_msg)
         }
         Ok(())
     }
@@ -223,11 +269,12 @@ mod tests {
         let mut cmd = RedisCmd::new(client, server, 0);
         let pipeline_reqs = b"PING\r\nPING\r\nPING\r\n";
         cmd.writer.write_all(pipeline_reqs).await?;
-        for i in 0..3i8 {
-            match cmd.read_async().await? {
-                Some(msg) => assert_eq!(RESP::Array(vec![RESP::SimpleString("PING".into())]), msg),
-                None => panic!(format!("No message! at i={}", i)),
-            }
+        let mut resp = cmd.read_async().await?;
+        // it's an array because it uses the compact form
+        let sent_msg = RESP::Array(vec![RESP::SimpleString("PING".into())]);
+        assert_eq!(resp.len(), 3);
+        for r in resp.drain(0..){
+            assert_eq!(r, sent_msg)
         }
         Ok(())
     }

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc;
 
-#[tokio::main(worker_threads = 2)]
+#[tokio::main(worker_threads = 4)]
 async fn main() -> ResultT<()> {
     let logger = SimpleLogger::new().with_level(LevelFilter::Info);
     logger.init()?;

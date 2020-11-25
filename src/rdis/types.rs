@@ -16,7 +16,8 @@ use log::{info, debug, warn, error};
 use super::engine::*;
 use hdrhistogram::Histogram;
 
-pub type ResultT<A> = Result<A, Box<dyn Error + Sync + Send>>;
+pub type ErrorT = Box<dyn Error + Sync + Send>;
+pub type ResultT<A> = Result<A, ErrorT>;
 
 use super::protocol::*;
 
@@ -71,7 +72,6 @@ impl RedisEngineApi {
     }
 
     pub async fn request(&self, req: RESP) -> ResultT<RESP> {
-        let t = Instant::now();
         let (tx, rx) = oneshot::channel();
         // fix this
         self.sender.send((req, tx)).await.unwrap();
@@ -106,22 +106,25 @@ impl  ClientConnection {
             let read_delta = before_read.elapsed().as_micros();
             debug!("Time for read {}, client={}", read_delta, self.client_epoch);
             match cmd {
-                Ok(Some(command)) => {
-                    debug!("Received command {:?}", command);
-                    let resp = match self.engine.request(command).await {
-                        Ok(resp) => resp,
-                        Err(err) => RESP::Error("Unexpected".to_owned(), err.to_string()),
-                    };
-                    debug!("Response is {:?}", resp);
-                    match self.redis_cmd.write_async(resp).await {
-                        Ok(()) => (),
-                        Err(err) => {
-                            error!("Error when writing to client={}", err);
-                            break;
-                        }
+                Ok(mut commands) => if commands.len() > 0{
+                    debug!("Received command {:?}", commands);
+                    for command in commands.drain(0..){
+                        let responses = match self.engine.request(command).await {
+                            Ok(resp) => resp,
+                            Err(err) => RESP::Error("Unexpected".to_owned(), err.to_string()),
+                        };
+                        debug!("Response is {:?}", responses);
+                        match self.redis_cmd.write_async(responses, true).await {
+                            Ok(()) => (),
+                            Err(err) => {
+                                error!("Error when writing to client={}", err);
+                                break;
+                            }
+                        }    
                     }
-                }
-                Ok(None) => break,
+                } else {
+                    break;
+                },
                 Err(err) => {
                     info!("Stopping loop, received error {}", err);
                     break;
