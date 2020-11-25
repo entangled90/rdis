@@ -33,12 +33,11 @@ async fn main() -> ResultT<()> {
         engine.start_loop()
     });
 
-    // tokio::time::timeout(Duration::from_secs(10), 
+    // tokio::time::timeout(Duration::from_secs(10),
     accept_connections(server, api).await;
 
     Ok(())
 }
-
 
 async fn accept_connections(server: RedisServer, api: Arc<RedisEngineApi>) {
     while let Ok((stream, _)) = server.listener.accept().await {

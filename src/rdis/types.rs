@@ -1,17 +1,20 @@
-use tokio::time::Instant;
-use std::fmt::Formatter;
 use std::fmt::Display;
-use tokio::net::tcp::OwnedWriteHalf;
-use tokio::net::tcp::OwnedReadHalf;
-use tokio::io::BufWriter;
+use std::fmt::Formatter;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
 use tokio::io::BufReader;
-use std::sync::{Arc, Mutex, atomic:: {AtomicUsize, Ordering}};
+use tokio::io::BufWriter;
+use tokio::net::tcp::OwnedReadHalf;
+use tokio::net::tcp::OwnedWriteHalf;
+use tokio::time::Instant;
 
+use log::{debug, error, info, warn};
 use std::error::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use log::{info, debug, warn, error};
 
 use super::engine::*;
 use hdrhistogram::Histogram;
@@ -21,22 +24,18 @@ pub type ResultT<A> = Result<A, ErrorT>;
 
 use super::protocol::*;
 
-
 pub struct RedisServer {
     pub listener: TcpListener,
     open_handles: Mutex<Vec<JoinHandle<()>>>,
-    client_epoch: AtomicUsize
+    client_epoch: AtomicUsize,
 }
-
 
 impl RedisServer {
     pub fn new(listener: TcpListener) -> RedisServer {
-        
         RedisServer {
             listener,
             open_handles: Mutex::new(Vec::with_capacity(1024)),
             client_epoch: AtomicUsize::new(0),
-
         }
     }
 
@@ -49,7 +48,7 @@ impl RedisServer {
         ClientConnection {
             redis_cmd: RedisCmd::from_stream(stream, client_epoch),
             engine,
-            client_epoch
+            client_epoch,
         }
     }
 
@@ -60,12 +59,11 @@ impl RedisServer {
     }
 }
 
-
 pub struct RedisEngineApi {
     sender: mpsc::Sender<(RESP, oneshot::Sender<RESP>)>,
 }
 impl RedisEngineApi {
-    pub fn new(sender: mpsc::Sender<(RESP, oneshot::Sender<RESP>)> ) -> RedisEngineApi {
+    pub fn new(sender: mpsc::Sender<(RESP, oneshot::Sender<RESP>)>) -> RedisEngineApi {
         RedisEngineApi {
             sender: sender.clone(),
         }
@@ -76,28 +74,28 @@ impl RedisEngineApi {
         // fix this
         self.sender.send((req, tx)).await.unwrap();
         match rx.await {
-            Ok(e) => {
-                Ok(e)
-            },
+            Ok(e) => Ok(e),
             Err(err) => Err(Box::new(err)),
         }
     }
 }
 
 pub struct ClientConnection {
-    redis_cmd: RedisCmd<OwnedReadHalf,BufWriter<OwnedWriteHalf>>,
+    redis_cmd: RedisCmd<OwnedReadHalf, BufWriter<OwnedWriteHalf>>,
     engine: Arc<RedisEngineApi>,
-    client_epoch: usize
+    client_epoch: usize,
 }
 
-
-impl Display for ClientConnection{
+impl Display for ClientConnection {
     fn fmt(&self, f: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
-        f.write_fmt(format_args!("ClientConnection{{client_epoch: {} }}", self.client_epoch))
+        f.write_fmt(format_args!(
+            "ClientConnection{{client_epoch: {} }}",
+            self.client_epoch
+        ))
     }
 }
 
-impl  ClientConnection {
+impl ClientConnection {
     pub async fn start_loop(mut self) -> () {
         info!("Connection received {}", self);
         loop {
@@ -106,25 +104,28 @@ impl  ClientConnection {
             let read_delta = before_read.elapsed().as_micros();
             debug!("Time for read {}, client={}", read_delta, self.client_epoch);
             match cmd {
-                Ok(mut commands) => if commands.len() > 0{
-                    debug!("Received command {:?}", commands);
-                    for command in commands.drain(0..){
-                        let responses = match self.engine.request(command).await {
-                            Ok(resp) => resp,
-                            Err(err) => RESP::Error("Unexpected".to_owned(), err.to_string()),
-                        };
-                        debug!("Response is {:?}", responses);
-                        match self.redis_cmd.write_async(responses, true).await {
-                            Ok(()) => (),
-                            Err(err) => {
-                                error!("Error when writing to client={}", err);
-                                break;
+                Ok(mut _commands) => {
+                    let mut commands: Vec<_> = _commands.into();
+                    if commands.len() > 0 {
+                        debug!("Received command {:?}", commands);
+                        for command in commands.drain(0..) {
+                            let responses = match self.engine.request(command).await {
+                                Ok(resp) => resp,
+                                Err(err) => RESP::Error("Unexpected".to_owned(), err.to_string()),
+                            };
+                            debug!("Response is {:?}", responses);
+                            match self.redis_cmd.write_async(responses, true).await {
+                                Ok(()) => (),
+                                Err(err) => {
+                                    error!("Error when writing to client={}", err);
+                                    break;
+                                }
                             }
-                        }    
+                        }
+                    } else {
+                        break;
                     }
-                } else {
-                    break;
-                },
+                }
                 Err(err) => {
                     info!("Stopping loop, received error {}", err);
                     break;

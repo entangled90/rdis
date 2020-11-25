@@ -1,8 +1,8 @@
-use tokio::runtime::{Runtime, Builder};
 use super::protocol::RESP;
 use log::{debug, error, info, warn};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use tokio::runtime::{Builder, Runtime};
 use tokio::sync::{mpsc, oneshot};
 use RESP::*;
 
@@ -112,14 +112,18 @@ impl RedisData {
 pub struct RedisEngine {
     data: RedisData,
     receiver: mpsc::Receiver<(RESP, oneshot::Sender<RESP>)>,
-    runtime: Runtime
+    runtime: Runtime,
 }
 
 impl RedisEngine {
     pub fn new(receiver: mpsc::Receiver<(RESP, oneshot::Sender<RESP>)>) -> RedisEngine {
         let data = RedisData::new();
         let runtime = Builder::new_current_thread().build().unwrap();
-        RedisEngine { data, receiver, runtime }
+        RedisEngine {
+            data,
+            receiver,
+            runtime,
+        }
     }
 
     fn current_time() -> u64 {
@@ -143,8 +147,6 @@ impl RedisEngine {
             }
         }
     }
-
-   
 
     fn handle_request(&mut self, req: RESP, t: u64) -> RESP {
         match req {

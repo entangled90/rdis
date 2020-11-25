@@ -13,7 +13,6 @@ use tokio::prelude::AsyncRead;
 use tokio::prelude::AsyncWrite;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-
 pub enum RESP {
     SimpleString(Vec<u8>),
     Error(String, String),
@@ -75,7 +74,7 @@ impl RESP {
             }
             RESP::Null => writer.write_all(NULL_MSG).await?,
         };
-        if flush{
+        if flush {
             writer.flush().await?;
         }
         Ok(())
@@ -121,8 +120,6 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
                 Ok(resp) => {
                     if let Some(r) = resp {
                         self.pipelined_request.push(r);
-                    } else {
-                        return Ok(vec![]);
                     }
                 }
                 Err(err) => {
@@ -152,17 +149,18 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
         }
     }
 
-    fn fill_output_pipeline_req(&mut self) -> ClientReq{
+    fn fill_output_pipeline_req(&mut self) -> ClientReq {
         let received = self.pipelined_request.len();
         if received == 1 {
             ClientReq::Single(self.pipelined_request.pop().unwrap())
         } else {
             let mut sendable = Vec::with_capacity(received);
             {
-                for  r in self.pipelined_request.drain(0..){
-                    sendable.push(r);           
+                for r in self.pipelined_request.drain(0..) {
+                    sendable.push(r);
                 }
             }
+            info!("requests are {}", sendable.len());
             ClientReq::Pipeline(sendable)
         }
     }
@@ -176,35 +174,31 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
         let size = slice.len();
         let (rem, resp) = match parser::read(slice) {
             Ok((rem, resp)) => Ok((Some(rem), Some(resp))),
-            Err(nom::Err::Incomplete(_)) => Ok((None,None)),
+            Err(nom::Err::Incomplete(_)) => Ok((None, None)),
             Err(err) => Err(ErrorT::from(format!("Fatal parsing error {}", err))),
         }?;
-        let rem_size = rem.map_or(0,|r| r.len());
+        let rem_size = rem.map_or(0, |r| r.len());
         self.buff = self.buff.split_off(size - rem_size);
         Ok(resp)
     }
 }
 
-pub enum ClientReq{
+#[derive(Debug, PartialEq, Eq)]
+pub enum ClientReq {
     Single(RESP),
     Pipeline(Vec<RESP>),
-    EOS
 }
 
 use ClientReq::*;
 
-// impl IntoIterator for ClientReq{
-//     type Item = RESP;
-//     type IntoIter = std::slice::Iter<RESP>;
-
-//     fn into_iter(self) -> <Self as std::iter::IntoIterator>::IntoIter {
-//         match self {
-//             Single(r) => vec![r],
-//             Pipeline(v) => v,
-//             EOS => vec![]
-//         }
-//     }
-// }
+impl Into<Vec<RESP>> for ClientReq {
+    fn into(self) -> Vec<RESP> {
+        match self {
+            Single(r) => vec![r],
+            Pipeline(v) => v,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -255,9 +249,9 @@ mod tests {
         for i in 0..3i8 {
             cmd.write_async(sent_msg.clone(), i == 2).await?;
         }
-        let mut resp = cmd.read_async().await?;
+        let mut resp: Vec<_> = cmd.read_async().await?.into();
         assert_eq!(resp.len(), 3);
-        for r in resp.drain(0..){
+        for r in resp.drain(0..) {
             assert_eq!(r, sent_msg)
         }
         Ok(())
@@ -269,11 +263,11 @@ mod tests {
         let mut cmd = RedisCmd::new(client, server, 0);
         let pipeline_reqs = b"PING\r\nPING\r\nPING\r\n";
         cmd.writer.write_all(pipeline_reqs).await?;
-        let mut resp = cmd.read_async().await?;
+        let mut resp: Vec<_> = cmd.read_async().await?.into();
         // it's an array because it uses the compact form
         let sent_msg = RESP::Array(vec![RESP::SimpleString("PING".into())]);
         assert_eq!(resp.len(), 3);
-        for r in resp.drain(0..){
+        for r in resp.drain(0..) {
             assert_eq!(r, sent_msg)
         }
         Ok(())

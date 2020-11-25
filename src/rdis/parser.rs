@@ -1,6 +1,6 @@
-use std::time::Instant;
 use super::protocol::RESP;
 use super::types::ResultT;
+use log::info;
 use nom::*;
 use nom::{
     branch::alt,
@@ -12,7 +12,7 @@ use nom::{
 };
 use std::convert::TryInto;
 use std::sync::Arc;
-use log::info;
+use std::time::Instant;
 
 fn read_positive_decimal(bytes: &[u8]) -> IResult<&[u8], u64> {
     let (rem, int_bytes) = digit1(bytes)?;
@@ -41,7 +41,10 @@ fn read_bulk(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let (rem, size) = preceded(char('$'), terminated(read_decimal, crlf))(bytes)?;
     if size > 0 {
         let us: u64 = size.try_into().unwrap();
-        terminated(map(take(us), |b: &[u8]| RESP::BulkString(Arc::new(b.into()))), crlf)(rem)
+        terminated(
+            map(take(us), |b: &[u8]| RESP::BulkString(Arc::new(b.into()))),
+            crlf,
+        )(rem)
     } else {
         Ok((rem, RESP::Null))
     }
@@ -49,7 +52,7 @@ fn read_bulk(bytes: &[u8]) -> IResult<&[u8], RESP> {
 
 fn read_simple(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let parser = preceded(char('+'), terminated(take_until("\r\n"), crlf));
-    map(parser, |s : &[u8]| RESP::SimpleString(s.into()))(bytes)
+    map(parser, |s: &[u8]| RESP::SimpleString(s.into()))(bytes)
 }
 
 fn read_error(bytes: &[u8]) -> IResult<&[u8], RESP> {
@@ -89,7 +92,7 @@ fn read_inline_commands(bytes: &[u8]) -> IResult<&[u8], RESP> {
     Ok((rem, RESP::Array(v_simple)))
 }
 
-pub fn read(bytes: &[u8]) -> IResult<&[u8], RESP>  {
+pub fn read(bytes: &[u8]) -> IResult<&[u8], RESP> {
     alt((
         read_integer,
         read_simple,
