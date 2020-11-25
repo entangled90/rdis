@@ -8,7 +8,7 @@ use simple_logger::SimpleLogger;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-#[tokio::main(worker_threads = 2)]
+#[tokio::main(worker_threads = 4)]
 async fn main() -> ResultT<()> {
     let logger = SimpleLogger::new().with_level(LevelFilter::Info);
     logger.init()?;
@@ -31,7 +31,6 @@ async fn main() -> ResultT<()> {
         engine.start_loop().await
     });
 
-    // tokio::time::timeout(Duration::from_secs(10),
     accept_connections(server, api).await;
 
     Ok(())

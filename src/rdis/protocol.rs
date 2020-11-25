@@ -131,11 +131,12 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
                             self.buff.reserve(2 * self.buff.len());
                             warn!("Expanding buffer to {}", self.buff.len());
                         }
+                        // let previous_capacity = self.buff.capacity();
                         let n = self.reader.read_buf(&mut self.buff).await?;
-                        debug!(
-                            "Read {} bytes from socket from client {}",
-                            n, self.client_epoch
-                        );
+                        // info!(
+                        //     "capacity = {}, Read {} bytes from socket from client {},",
+                        //     previous_capacity, n, self.client_epoch
+                        // );
                         if n == 0 {
                             // The remote closed the connection. For this to be
                             // a clean shutdown, there should be no data in the
@@ -177,7 +178,7 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
             Err(err) => Err(ErrorT::from(format!("Fatal parsing error {}", err))),
         }?;
         let rem_size = rem.map_or(0, |r| r.len());
-        self.buff = self.buff.split_off(size - rem_size);
+        self.buff.advance(size - rem_size);
         Ok(resp)
     }
 }
@@ -210,6 +211,7 @@ impl ClientReq {
 
 #[cfg(test)]
 mod tests {
+    use bytes::{BytesMut, Buf, BufMut};
 
     use super::super::types::*;
     use super::RedisCmd;
@@ -217,6 +219,13 @@ mod tests {
     use std::io::Cursor;
     use std::sync::Arc;
     use tokio::io::AsyncWriteExt;
+
+    #[test]
+    pub fn bytes_mut_test() {
+        let mut b = BytesMut::with_capacity(4096);
+        b.put(vec![0; 128].as_slice());
+        assert_eq!(b.remaining(), 4096 -128);
+    }
 
     #[tokio::test]
     pub async fn test_resp_encoding() -> ResultT<()> {
