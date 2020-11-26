@@ -37,7 +37,7 @@ impl RedisData {
         let to_remove: Vec<u64> = self
             .eviction
             .range(self.last_evicted_t..t)
-            .map(|(k, _)| k.clone())
+            .map(|(k, _)| *k)
             .collect();
         self.last_evicted_t = t;
 
@@ -64,12 +64,14 @@ impl RedisData {
 
     fn set(&mut self, k: Arc<RawValue>, v: Arc<RawValue>, evict_at: Option<u64>) {
         self.single_map.insert(k.clone(), v);
-        evict_at.map(|t| self.insert_eviction(k, t));
+        if let Some(t) = evict_at {
+            self.insert_eviction(k, t)
+        }
     }
 
     fn get(&mut self, k: &RawValue, t: u64) -> Option<Arc<RawValue>> {
         self.evict_if_needed(t);
-        self.single_map.get(k).map(|el| el.clone())
+        self.single_map.get(k).clone().map(|el| el.clone())
     }
 
     fn incr(&mut self, k: &RawValue, t: u64) -> ResultT<Option<i64>> {
@@ -87,17 +89,19 @@ impl RedisData {
         evict_at.map(|t| self.insert_eviction(k.clone(), t));
         let deq = self
             .list_map
-            .entry(k.clone())
+            .entry(k)
             .or_insert(VecDeque::with_capacity(DEFAULT_LIST_CAPACITY));
         deq.push_front(v);
     }
 
     fn r_push(&mut self, k: Arc<RawValue>, v: Arc<RawValue>, evict_at: Option<u64>) {
-        evict_at.map(|t| self.insert_eviction(k.clone(), t));
+        if let Some(t) = evict_at {
+            self.insert_eviction(k.clone(), t)
+        }
         let deq = self
             .list_map
-            .entry(k.clone())
-            .or_insert(VecDeque::with_capacity(DEFAULT_LIST_CAPACITY));
+            .entry(k)
+            .or_insert_with(|| VecDeque::with_capacity(DEFAULT_LIST_CAPACITY));
         deq.push_back(v);
     }
 
@@ -128,7 +132,7 @@ impl RedisEngine {
             .as_millis() as u64
     }
 
-    pub async fn start_loop(&mut self) -> () {
+    pub async fn start_loop(&mut self)  {
         loop {
             match self.receiver.recv().await {
                 Some((req, channel)) => {
@@ -164,16 +168,13 @@ impl RedisEngine {
                     _ => RedisEngine::error_resp(),
                 },
                 [BulkString(cmd), BulkString(k)] => match cmd.as_slice() {
-                    b"GET" => self
-                        .data
-                        .get(k, t)
-                        .map_or(RESP::Null, |v| BulkString(v.clone())),
+                    b"GET" => self.data.get(k, t).map_or(RESP::Null, BulkString),
                     b"INCR" => match self.data.incr(k, t) {
                         Ok(res) => res.map_or(RESP::Null, |i| SimpleString(i.to_string().into())),
                         Err(err) => Error("WRONG_TYPE".into(), err.to_string()),
                     },
-                    b"LPOP" => self.data.l_pop(k).map_or(RESP::Null, |v| BulkString(v)),
-                    b"RPOP" => self.data.r_pop(k).map_or(RESP::Null, |v| BulkString(v)),
+                    b"LPOP" => self.data.l_pop(k).map_or(RESP::Null, BulkString),
+                    b"RPOP" => self.data.r_pop(k).map_or(RESP::Null, BulkString),
                     _ => RedisEngine::error_resp(),
                 },
                 [BulkString(cmd), BulkString(k), BulkString(v)] => match cmd.as_slice() {

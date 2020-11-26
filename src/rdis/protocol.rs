@@ -5,7 +5,6 @@ use bytes::{Buf, BytesMut};
 use log::{debug, error, info, warn};
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
@@ -123,7 +122,7 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
                     }
                 }
                 Err(err) => {
-                    if self.pipelined_request.len() > 0 {
+                    if !self.pipelined_request.is_empty() {
                         // info!("returning req #{}", self.pipelined_request.len());
                         return Ok(self.fill_output_pipeline_req());
                     } else {
@@ -172,12 +171,11 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
     fn parse_frame(&mut self) -> ResultT<Option<RESP>> {
         let slice = &self.buff;
         let size = slice.len();
-        let (rem, resp) = match parser::read(slice) {
-            Ok((rem, resp)) => Ok((Some(rem), Some(resp))),
-            Err(nom::Err::Incomplete(_)) => Ok((None, None)),
+        let (rem_size, resp) = match parser::read(slice) {
+            Ok((rem, resp)) => Ok((rem.len(), Some(resp))),
+            Err(nom::Err::Incomplete(_)) => Ok((0, None)),
             Err(err) => Err(ErrorT::from(format!("Fatal parsing error {}", err))),
         }?;
-        let rem_size = rem.map_or(0, |r| r.len());
         self.buff.advance(size - rem_size);
         Ok(resp)
     }

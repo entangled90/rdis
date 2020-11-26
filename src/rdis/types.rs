@@ -4,7 +4,6 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
 };
-use tokio::io::BufReader;
 use tokio::io::BufWriter;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::tcp::OwnedWriteHalf;
@@ -15,9 +14,6 @@ use std::error::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-
-use super::engine::*;
-use hdrhistogram::Histogram;
 
 pub type ErrorT = Box<dyn Error + Sync + Send>;
 pub type ResultT<A> = Result<A, ErrorT>;
@@ -65,7 +61,7 @@ pub struct RedisEngineApi {
 impl RedisEngineApi {
     pub fn new(sender: mpsc::Sender<(ClientReq, oneshot::Sender<ClientReq>)>) -> RedisEngineApi {
         RedisEngineApi {
-            sender: sender.clone(),
+            sender,
         }
     }
 
@@ -96,11 +92,11 @@ impl Display for ClientConnection {
 }
 
 impl ClientConnection {
-    pub async fn start_loop(mut self) -> () {
+    pub async fn start_loop(mut self) {
         info!("Connection received {}", self);
         loop {
             let before_read = Instant::now();
-            let cmd = (&mut self).redis_cmd.read_async().await;
+            let cmd = self.redis_cmd.read_async().await;
             let read_delta = before_read.elapsed().as_micros();
             debug!("Time for read {}, client={}", read_delta, self.client_epoch);
             match cmd {

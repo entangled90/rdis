@@ -71,7 +71,7 @@ fn read_string(bytes: &[u8]) -> String {
 
 fn read_integer(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let parser = preceded(char(':'), terminated(read_decimal, crlf));
-    map(parser, |b| RESP::Integer(b))(bytes)
+    map(parser, RESP::Integer)(bytes)
 }
 
 fn read_primitive(bytes: &[u8]) -> IResult<&[u8], RESP> {
@@ -80,7 +80,7 @@ fn read_primitive(bytes: &[u8]) -> IResult<&[u8], RESP> {
 
 fn read_array(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let (rem, size) = preceded(char('*'), terminated(read_positive_decimal, crlf))(bytes)?;
-    map(count(read_primitive, size as usize), |v| RESP::Array(v))(rem)
+    map(count(read_primitive, size as usize), RESP::Array)(rem)
 }
 
 fn read_inline_commands(bytes: &[u8]) -> IResult<&[u8], RESP> {
