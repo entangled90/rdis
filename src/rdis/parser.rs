@@ -12,7 +12,16 @@ use nom::{
 };
 use std::convert::TryInto;
 use std::sync::Arc;
-use std::time::Instant;
+
+
+fn read_integer_ascii(bytes: &[u8]) -> u64{
+    let len = bytes.len();
+    let mut int = 0;
+    for (idx, i) in bytes.iter().enumerate(){
+        int += 10u64.pow((len - idx -1)as u32) * ((*i - 48) as u64);
+    }
+    int
+}
 
 fn read_positive_decimal(bytes: &[u8]) -> IResult<&[u8], u64> {
     let (rem, int_bytes) = digit1(bytes)?;
@@ -165,5 +174,19 @@ mod test {
                 .1
         );
         assert_eq!(RESP::Array(vec![]), read_array(b"*0\r\n").unwrap().1);
+    }
+
+
+
+    #[test]
+    pub fn read_integer_ascii_test(){
+        for i in 0..10000{
+            assert_eq!(read_integer_ascii(i.to_string().as_bytes()), i);
+        }
+    }
+
+    #[test]
+    pub fn read_integer_ascii_panic_test(){
+        read_integer_ascii("a".as_bytes());
     }
 }
