@@ -4,7 +4,7 @@ use log::info;
 use nom::*;
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take, take_until},
+    bytes::complete::{take, take_until},
     character::complete::{alphanumeric1, char, crlf, digit1, space1},
     combinator::{map, opt},
     multi::{count, separated_list1},
@@ -14,6 +14,7 @@ use std::convert::TryInto;
 use std::sync::Arc;
 
 
+#[inline]
 fn read_integer_ascii(bytes: &[u8]) -> u64{
     let len = bytes.len();
     let mut int = 0;
@@ -23,16 +24,14 @@ fn read_integer_ascii(bytes: &[u8]) -> u64{
     int
 }
 
+#[inline]
 fn read_positive_decimal(bytes: &[u8]) -> IResult<&[u8], u64> {
     let (rem, int_bytes) = digit1(bytes)?;
     // FIX ERROR HANDLING
-    let int: u64 = String::from_utf8(int_bytes.to_vec())
-        .unwrap()
-        .parse()
-        .unwrap();
-    Ok((rem, int))
+    Ok((rem, read_integer_ascii(int_bytes)))
 }
 
+#[inline]
 fn read_decimal(bytes: &[u8]) -> IResult<&[u8], i64> {
     let (rem, (minus, int)) = tuple((opt(char('-')), read_positive_decimal))(bytes)?;
     Ok((
@@ -45,6 +44,7 @@ fn read_decimal(bytes: &[u8]) -> IResult<&[u8], i64> {
     ))
 }
 
+#[inline]
 // supports null
 fn read_bulk(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let (rem, size) = preceded(char('$'), terminated(read_decimal, crlf))(bytes)?;
@@ -59,11 +59,12 @@ fn read_bulk(bytes: &[u8]) -> IResult<&[u8], RESP> {
     }
 }
 
+#[inline]
 fn read_simple(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let parser = preceded(char('+'), terminated(take_until("\r\n"), crlf));
     map(parser, |s: &[u8]| RESP::SimpleString(s.into()))(bytes)
 }
-
+#[inline]
 fn read_error(bytes: &[u8]) -> IResult<&[u8], RESP> {
     map(
         preceded(
@@ -74,24 +75,31 @@ fn read_error(bytes: &[u8]) -> IResult<&[u8], RESP> {
     )(bytes)
 }
 
+#[inline]
 fn read_string(bytes: &[u8]) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
+#[inline]
 fn read_integer(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let parser = preceded(char(':'), terminated(read_decimal, crlf));
     map(parser, RESP::Integer)(bytes)
 }
 
+#[inline]
 fn read_primitive(bytes: &[u8]) -> IResult<&[u8], RESP> {
     alt((read_integer, read_simple, read_bulk, read_error))(bytes)
 }
 
+
+#[inline]
 fn read_array(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let (rem, size) = preceded(char('*'), terminated(read_positive_decimal, crlf))(bytes)?;
     map(count(read_primitive, size as usize), RESP::Array)(rem)
 }
 
+
+#[inline]
 fn read_inline_commands(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let (rem, v) = terminated(separated_list1(space1, alphanumeric1), crlf)(bytes)?;
     let mut v_simple = Vec::with_capacity(v.len());
@@ -101,14 +109,15 @@ fn read_inline_commands(bytes: &[u8]) -> IResult<&[u8], RESP> {
     Ok((rem, RESP::Array(v_simple)))
 }
 
+#[inline]
 pub fn read(bytes: &[u8]) -> IResult<&[u8], RESP> {
     alt((
+        read_array,
+        read_inline_commands,
         read_integer,
         read_simple,
         read_bulk,
         read_error,
-        read_array,
-        read_inline_commands,
     ))(bytes)
 }
 

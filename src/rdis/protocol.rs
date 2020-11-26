@@ -218,12 +218,12 @@ mod tests {
     use std::sync::Arc;
     use tokio::io::AsyncWriteExt;
 
-    // #[test]
-    // pub fn bytes_mut_test() {
-    //     let mut b = BytesMut::with_capacity(4096);
-    //     b.put(vec![0; 128].as_slice());
-    //     assert_eq!(b.remaining(), 4096 -128);
-    // }
+    #[test]
+    pub fn bytes_mut_test() {
+        let mut b = BytesMut::with_capacity(4096);
+        b.put(vec![0; 128].as_slice());
+        assert_eq!(b.remaining(), 4096 -128);
+    }
 
     #[tokio::test]
     pub async fn test_resp_encoding() -> ResultT<()> {
