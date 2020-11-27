@@ -176,7 +176,11 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
             Err(nom::Err::Incomplete(_)) => Ok((0, None)),
             Err(err) => Err(ErrorT::from(format!("Fatal parsing error {}", err))),
         }?;
-        self.buff.advance(size - rem_size);
+        let decoded_len= size - rem_size;
+        self.buff.advance(decoded_len);
+        if self.buff.capacity() < decoded_len * 2 {
+            self.buff.reserve(4096);
+        }
         Ok(resp)
     }
 }

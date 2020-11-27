@@ -9,7 +9,7 @@ edition = "2018"
 [profile.release]
 lto = true
 opt-level = 3
-# debug = true
+debug = true
 
 [dependencies]
 tokio = { version = "0.3", features = ["full"] }

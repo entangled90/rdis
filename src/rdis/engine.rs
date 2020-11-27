@@ -3,7 +3,6 @@ use crate::rdis::protocol::ClientReq;
 use log::{debug, info, warn};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use tokio::runtime::{Builder, Runtime};
 use tokio::sync::{mpsc, oneshot};
 use RESP::*;
 
