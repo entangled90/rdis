@@ -1,12 +1,12 @@
 use super::protocol::RESP;
-use crate::rdis::protocol::ClientReq;
+use crate::rdis::protocol::{ClientReq, RawValue};
 use log::{debug, info, warn};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use RESP::*;
+use smallvec::SmallVec;
 
-type RawValue = Vec<u8>;
 use super::types::ResultT;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -162,14 +162,14 @@ impl RedisEngine {
             Array(commands) => match commands.as_slice() {
                 [] => Error("todo".into(), "empty command".into()),
                 [BulkString(single)] => match single.as_slice() {
-                    b"PING" => SimpleString("PONG".into()),
-                    b"COMMAND" => SimpleString("OK".into()),
+                    b"PING" => SimpleString("PONG".as_bytes().into()),
+                    b"COMMAND" => SimpleString("OK".as_bytes().into()),
                     _ => RedisEngine::error_resp(),
                 },
                 [BulkString(cmd), BulkString(k)] => match cmd.as_slice() {
                     b"GET" => self.data.get(k, t).map_or(RESP::Null, BulkString),
                     b"INCR" => match self.data.incr(k, t) {
-                        Ok(res) => res.map_or(RESP::Null, |i| SimpleString(i.to_string().into())),
+                        Ok(res) => res.map_or(RESP::Null, |i| SimpleString(i.to_string().as_bytes().into())),
                         Err(err) => Error("WRONG_TYPE".into(), err.to_string()),
                     },
                     b"LPOP" => self.data.l_pop(k).map_or(RESP::Null, BulkString),
@@ -202,6 +202,6 @@ impl RedisEngine {
     }
 
     fn ok() -> RESP {
-        SimpleString("OK".into())
+        SimpleString("OK".as_bytes().into())
     }
 }
