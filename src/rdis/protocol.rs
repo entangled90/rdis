@@ -176,9 +176,12 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
             Err(nom::Err::Incomplete(_)) => Ok((0, None)),
             Err(err) => Err(ErrorT::from(format!("Fatal parsing error {}", err))),
         }?;
-        let decoded_len= size - rem_size;
+        let decoded_len = size - rem_size;
         self.buff.advance(decoded_len);
-        if self.buff.capacity() < decoded_len * 2 {
+        // no more data, we can reset all the cursors
+        if rem_size == 0 {
+            self.buff.clear();
+        } else if self.buff.capacity() - self.buff.len() < 256 {
             self.buff.reserve(4096);
         }
         Ok(resp)
@@ -225,8 +228,8 @@ mod tests {
     #[test]
     pub fn bytes_mut_test() {
         let mut b = BytesMut::with_capacity(4096);
-        b.put(vec![0; 128].as_slice());
-        assert_eq!(b.remaining(), 4096 -128);
+        b.extend_from_slice(vec![0; 128].as_slice());
+        assert_eq!(b.capacity() - b.len(), 4096 -128);
     }
 
     #[tokio::test]
