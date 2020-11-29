@@ -12,7 +12,7 @@ use nom::{
 };
 use std::convert::TryInto;
 use std::sync::Arc;
-use smallvec::{SmallVec, ToSmallVec};
+
 
 #[inline]
 fn read_integer_ascii(bytes: &[u8]) -> u64{
@@ -51,7 +51,7 @@ fn read_bulk(bytes: &[u8]) -> IResult<&[u8], RESP> {
     if size > 0 {
         let us: u64 = size.try_into().unwrap();
         terminated(
-            map(take(us), |b: &[u8]| RESP::BulkString(Arc::new(SmallVec::from(b)))),
+            map(take(us), |b: &[u8]| RESP::BulkString(Arc::new(b.into()))),
             crlf,
         )(rem)
     } else {

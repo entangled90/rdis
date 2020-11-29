@@ -320,7 +320,6 @@ dependencies = [
  "log",
  "nom",
  "simple_logger",
- "smallvec",
  "tokio",
 ]
 

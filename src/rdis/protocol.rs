@@ -10,17 +10,14 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::prelude::AsyncRead;
 use tokio::prelude::AsyncWrite;
-use smallvec::SmallVec;
-
-pub type RawValue = SmallVec<[u8;4]>;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum RESP {
-    SimpleString(SmallVec<[u8;8]>),
+    SimpleString(Vec<u8>),
     Error(String, String),
     Integer(i64),
-    BulkString(Arc<SmallVec<[u8;4]>>),
-    Array(Vec<RESP>), 
+    BulkString(Arc<Vec<u8>>),
+    Array(Vec<RESP>),
     Null,
 }
 
