@@ -12,7 +12,7 @@ use nom::{
 };
 use std::convert::TryInto;
 use std::sync::Arc;
-
+use tracing::{Level, event, instrument};
 
 #[inline]
 fn read_integer_ascii(bytes: &[u8]) -> u64{
@@ -97,7 +97,6 @@ fn read_array(bytes: &[u8]) -> IResult<&[u8], RESP> {
     let (rem, size) = preceded(char('*'), terminated(read_positive_decimal, crlf))(bytes)?;
     map(count(read_primitive, size as usize), RESP::Array)(rem)
 }
-
 
 #[inline]
 fn read_inline_commands(bytes: &[u8]) -> IResult<&[u8], RESP> {

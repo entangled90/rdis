@@ -10,6 +10,7 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::prelude::AsyncRead;
 use tokio::prelude::AsyncWrite;
+use tracing::instrument;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum RESP {
@@ -32,10 +33,11 @@ impl RESP {
         Ok(())
     }
 
+    #[instrument]
     #[async_recursion]
     pub async fn write_async<W>(self, writer: &mut W, flush: bool) -> ResultT<()>
     where
-        W: AsyncWriteExt + Unpin + Send,
+        W: AsyncWriteExt + Unpin + Send + Debug,
     {
         match self {
             RESP::SimpleString(s) => {
