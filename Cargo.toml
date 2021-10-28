@@ -12,13 +12,17 @@ opt-level = 3
 debug = true
 
 [dependencies]
-tokio = { version = "0.3", features = ["full"] }
-bytes = {version = "0.6.0"}
-nom = {version ="6.0.0"}
+tokio = { version = "1", features = ["full"] }
+bytes = {version = "1"}
+nom = {version ="7"}
 async-recursion = {version="0.3"}
 log = {version = "0.4"}
-simple_logger = {version = "1.11"}
+simple_logger = {version = "1"}
+
+#tracing stuff
 tracing = "0.1"
-tracing-subscriber = {version = "0.2"}
 tracing-futures = {version = "0.2"}
-tracing-flame = {version = "0.1"}
+tracing-opentelemetry = "0.16.0"
+tracing-subscriber = "0.3"
+opentelemetry = {version = "*", features = ["rt-tokio"]}
+opentelemetry-jaeger = { version = "*", features = ["rt-tokio"]}

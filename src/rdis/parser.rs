@@ -1,6 +1,4 @@
 use super::protocol::RESP;
-use super::types::ResultT;
-use log::info;
 use nom::*;
 use nom::{
     branch::alt,
@@ -12,7 +10,7 @@ use nom::{
 };
 use std::convert::TryInto;
 use std::sync::Arc;
-use tracing::{Level, event, instrument};
+use tracing::instrument;
 
 #[inline]
 fn read_integer_ascii(bytes: &[u8]) -> u64{
@@ -109,6 +107,7 @@ fn read_inline_commands(bytes: &[u8]) -> IResult<&[u8], RESP> {
 }
 
 #[inline]
+#[instrument]
 pub fn read(bytes: &[u8]) -> IResult<&[u8], RESP> {
     alt((
         read_array,

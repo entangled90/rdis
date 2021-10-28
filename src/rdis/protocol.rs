@@ -2,14 +2,12 @@ use super::parser;
 use super::types::*;
 use async_recursion::async_recursion;
 use bytes::{Buf, BytesMut};
-use log::{debug, error, info, warn};
+use tracing::*;
 use std::fmt::Debug;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
-use tokio::prelude::AsyncRead;
-use tokio::prelude::AsyncWrite;
 use tracing::instrument;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -123,7 +121,7 @@ impl<R: AsyncRead + Unpin + Send, W: AsyncWrite + Unpin + Send + Debug> RedisCmd
                         self.pipelined_request.push(r);
                     }
                 }
-                Err(err) => {
+                Err(_) => {
                     if !self.pipelined_request.is_empty() {
                         // info!("returning req #{}", self.pipelined_request.len());
                         return Ok(self.fill_output_pipeline_req());
@@ -218,7 +216,7 @@ impl ClientReq {
 
 #[cfg(test)]
 mod tests {
-    use bytes::{BytesMut, Buf, BufMut};
+    use bytes::{BytesMut};
 
     use super::super::types::*;
     use super::RedisCmd;

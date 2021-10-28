@@ -9,7 +9,7 @@ use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::time::Instant;
 
-use log::{debug, error, info, warn};
+use tracing::*;
 use std::error::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
@@ -97,6 +97,8 @@ impl ClientConnection {
         loop {
             let before_read = Instant::now();
             let cmd = self.redis_cmd.read_async().await;
+            let span = span!(Level::INFO, "message received");
+            let _guard = span.enter();
             let read_delta = before_read.elapsed().as_micros();
             debug!("Time for read {}, client={}", read_delta, self.client_epoch);
             match cmd {

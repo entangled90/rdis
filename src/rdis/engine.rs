@@ -1,7 +1,9 @@
 use super::protocol::RESP;
 use crate::rdis::protocol::ClientReq;
-use log::{debug, info, warn};
+use tracing::*;
+use tracing::instrument;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use RESP::*;
@@ -118,6 +120,12 @@ pub struct RedisEngine {
     receiver: mpsc::Receiver<(ClientReq, oneshot::Sender<ClientReq>)>,
 }
 
+impl Debug for RedisEngine{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisEngine").finish()
+    }
+}
+
 impl RedisEngine {
     pub fn new(receiver: mpsc::Receiver<(ClientReq, oneshot::Sender<ClientReq>)>) -> RedisEngine {
         let data = RedisData::new();
@@ -157,6 +165,7 @@ impl RedisEngine {
         }
     }
 
+    #[instrument]
     fn handle_request(&mut self, req: &RESP, t: u64) -> RESP {
         match req {
             Array(commands) => match commands.as_slice() {
