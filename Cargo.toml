@@ -12,9 +12,9 @@ opt-level = 3
 debug = true
 
 [dependencies]
-tokio = { version = "0.3", features = ["full"] }
-bytes = {version = "0.6.0"}
-nom = {version ="6.0.0"}
+tokio = { version = "1", features = ["full"] }
+bytes = {version = "1"}
+nom = {version ="7"}
 async-recursion = {version="0.3"}
 log = {version = "0.4"}
-simple_logger = {version = "1.11"}
+simple_logger = {version = "1"}

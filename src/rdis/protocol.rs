@@ -5,11 +5,9 @@ use bytes::{Buf, BytesMut};
 use log::{debug, error, info, warn};
 use std::fmt::Debug;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
-use tokio::prelude::AsyncRead;
-use tokio::prelude::AsyncWrite;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum RESP {
