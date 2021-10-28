@@ -1,6 +1,6 @@
 use super::protocol::RESP;
 use crate::rdis::protocol::ClientReq;
-use log::{debug, info, warn};
+use log::*;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};

@@ -9,7 +9,7 @@ use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::time::Instant;
 
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use std::error::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};

@@ -1,6 +1,4 @@
 use super::protocol::RESP;
-use super::types::ResultT;
-use log::info;
 use nom::*;
 use nom::{
     branch::alt,
